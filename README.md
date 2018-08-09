@@ -32,3 +32,10 @@ To create new Parser
 To parse an url 
 
 > url, err := parse.Parse("http://github.com")
+
+## Reference
+[go-tld](https://github.com/jpillora/go-tld)
+
+[Trie](https://en.wikipedia.org/wiki/Trie)
+
+[Public Suffix List](https://publicsuffix.org/list/)
