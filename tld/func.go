@@ -2,18 +2,11 @@ package tld
 
 import (
 	"bufio"
+	"errors"
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 )
-
-type URL struct {
-	Domain, Subdomain, TLD string
-	*url.URL
-}
-
-const DOMAIN_REGEX = `((http|https)\:/\/)?\w+(\.\w+)+(\:\d+)?`
 
 func fetch() {
 	file, err := os.Open(dataFile)
@@ -21,36 +14,28 @@ func fetch() {
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
-		tld = append(tld, scanner.Text())
+		tld.Add(scanner.Text())
 	}
 }
 
 func update() bool {
 
-	// connect to host
-	if debugMode {
-		println("Connecting to", tldFile, "...")
-	}
+	debug("Connecting to", tldFile, "...")
+
 	resp, err := http.Get(tldFile)
 	if err != nil {
-		println("Have problem with internet connection")
-		println("Use offline data")
+		debug("Have problem with internet connection")
+		debug("Use offline data")
 		return false
 	}
-	if debugMode {
-		println("Connected!")
-	}
+	debug("Connected!")
 
-	// read the data file
-	if debugMode {
-		println("Reading data...")
-	}
+	debug("Reading data...")
+
 	scanner := bufio.NewScanner(resp.Body)
 	defer resp.Body.Close()
 
-	if debugMode {
-		println("Created!")
-	}
+	debug("Created!")
 
 	for scanner.Scan() {
 		text := scanner.Text()
@@ -60,53 +45,100 @@ func update() bool {
 		if text[0] == '!' || text[0] == '*' {
 			text = text[2:]
 		}
-		tld = append(tld, text)
+		tld.Add(reverse(text))
 
 	}
 
-	sort.Strings(tld)
-
-	// check if file exist
 	if isFileExist(dataFile) {
-		if debugMode {
-			println("Data file found! Removing...")
-		}
+		debug("Data file found! Removing...")
+
 		err := os.RemoveAll(dataFile)
 		handle(err)
-		if debugMode {
-			println("File removed!")
-		}
+		debug("File removed!")
+
 	}
-	// create data file
-	if debugMode {
-		println("Creating data file...")
-	}
+
+	debug("Creating data file...")
+
 	file, err := os.Create(dataFile)
 	handle(err)
-	if debugMode {
-		println("Created!")
+	debug("Created!")
+
+	debug("Export data to", dataFile)
+
+	for _, v := range tld.Prefix("") {
+		file.WriteString(reverse(v) + "\n")
 	}
 
-	if debugMode {
-		println("Export data to", dataFile)
-	}
-	for _, v := range tld {
-		file.WriteString(v + "\n")
-	}
-
-	if debugMode {
-		println("Exported!")
-	}
+	debug("Exported!")
 
 	file.Close()
 	return true
 
 }
 
-func newParser() (func(domain string), error) {
-	if !update() {
+// Update : Update list of tld to newest
+func Update() bool {
+	debug("Force Update")
+	return update()
+}
+
+// SetDebugMode : Set pkg debug mode
+func SetDebugMode(mode bool) {
+	debugMode = mode
+}
+
+// SetAutoUpdate : set autoupdate mode
+func SetAutoUpdate(update bool) {
+	autoUpdate = update
+}
+
+// NewParser : return a parser
+func NewParser() func(string) (*URL, error) {
+	if !autoUpdate || !update() {
 		fetch()
 	}
 
-	return nil, nil
+	debug("Parse Initialized!")
+
+	return func(s string) (*URL, error) {
+		debug("Parsing", s)
+		url, err := url.Parse(s)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if len(url.Host) == 0 {
+			debug("Parsed")
+			return &URL{URL: url}, nil
+
+		}
+		domain, port := split(url.Host)
+
+		tldNow := reverse(tld.CommonWord(reverse(domain)))
+
+		if len(tldNow) == 0 {
+			debug("TLD not found!")
+			return nil, errors.New("tld not found!")
+		}
+		domain = domain[:len(domain)-len(tldNow)]
+
+		subdomain := ""
+		for i := len(domain) - 1; i >= 0; i-- {
+			if domain[i] == '.' {
+				subdomain = domain[:i]
+				domain = domain[i+1:]
+				break
+			}
+		}
+		debug("Parsed")
+		return &URL{
+			Subdomain: subdomain,
+			Domain:    domain,
+			TLD:       tldNow,
+			Port:      port,
+			URL:       url,
+		}, nil
+	}
 }
